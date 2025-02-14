@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>정적분으로 정의된 함수(2)</title>
+  <!-- MathJax 로드 (LaTeX 수식 렌더링용) -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      background-color: white;
+      color: black;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .hidden {
+      display: none;
+    }
+    .energy-bar {
+      width: 200px;
+      height: 20px;
+      background-color: #000;
+      margin-bottom: 10px;
+      position: relative;
+    }
+    .energy-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background-color: #fff;
+      width: 100%;
+      transition: width 0.1s linear;
+    }
+    .answer-choice {
+      margin: 5px 0;
+    }
+    .explanation {
+      margin: 10px 0;
+      color: #c00;
+    }
+    .difficulty-select, .game-screen, .game-over-screen {
+      margin-top: 20px;
+    }
+    .score-box, .lives-box, .time-box {
+      margin: 5px 0;
+    }
+    .problem-box {
+      margin: 10px 0;
+      border: 1px solid #000;
+      padding: 10px;
+    }
+    .choice-list {
+      margin-top: 10px;
+    }
+    .btn {
+      margin-top: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+      border: 1px solid #000;
+      background: #fff;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .explanation.correct {
+      color: #009900;
+    }
+    #response {
+      margin-top: 10px;
+      white-space: pre;
+    }
+  </style>
+</head>
+<body>
+
+<h1>정적분으로 정의된 함수(2)</h1>
+
+<!-- 첫 화면: 이름 입력, 난이도 선택 -->
+<div id="start-screen">
+  <div>
+    <label for="playerName">이름 입력: </label>
+    <input type="text" id="playerName" />
+  </div>
+  <div class="difficulty-select">
+    <label>난이도 선택:</label>
+    <select id="difficultySelect">
+      <option value="top">최상(문제당 20초, 정답 시 20점)</option>
+      <option value="high">상(문제당 30초, 정답 시 15점)</option>
+      <option value="mid">중(문제당 40초, 정답 시 13점)</option>
+      <option value="low">하(시간 제한 없음, 정답 시 10점)</option>
+    </select>
+  </div>
+  <button class="btn" onclick="startGame()">게임 시작</button>
+</div>
+
+<!-- 게임 진행 화면 -->
+<div id="game-screen" class="hidden">
+  <div class="score-box">점수: <span id="score">0</span></div>
+  <div class="lives-box">남은 기회: <span id="lives">3</span></div>
+  <div class="time-box">전체 게임 시간: <span id="totalTime">0</span>초 경과</div>
+  <div class="energy-bar" id="energyBar" style="display: none;">
+    <div class="energy-fill" id="energyFill"></div>
+  </div>
+
+  <div class="problem-box">
+    <div id="problemText"></div>
+    <div class="choice-list" id="choiceList"></div>
+    <div id="feedback" class="explanation hidden"></div>
+    <button class="btn" id="submitBtn" onclick="submitAnswer()">제출</button>
+    <button class="btn hidden" id="nextBtn" onclick="nextQuestion()">다음 문제</button>
+  </div>
+</div>
+
+<!-- 게임 종료 화면 -->
+<div id="game-over-screen" class="hidden">
+  <h2>게임 종료</h2>
+  <div>최종 점수: <span id="finalScore">0</span></div>
+  <button class="btn" onclick="sendScore()">점수전송</button>
+  <div id="response"></div>
+</div>
+
+<script>
+// 서버로 점수 전송 함수
+function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(async (response) => {
+        const responseData = await response.json();
+        if (response.ok) {
+            document.getElementById('response').innerText =
+                `성공: ${JSON.stringify(responseData, null, 2)}`;
+        } else {
+            document.getElementById('response').innerText =
+                `오류: ${JSON.stringify(responseData, null, 2)}`;
+        }
+    })
+    .catch(error => {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText =
+            `네트워크 오류: ${error.message}`;
+    });
+}
+
+// 문제 배열
+const problems = [
+  {
+    question: "다음 함수를 고려하자. \\(f(x) = \\int_{0}^{x} (t^2 + t - 2)\\,dt\\). 이 때, 이 함수의 극댓값과 극솟값으로 옳은 것은?",
+    choices: [
+      "\\(\\max = 3,\\;\\min = -2\\)",
+      "\\(\\max = 2,\\;\\min = -\\dfrac{7}{6}\\)",
+      "\\(\\max = \\dfrac{10}{3},\\;\\min = -\\dfrac{7}{6}\\)",
+      "\\(\\max = \\dfrac{10}{3},\\;\\min = -2\\)"
+    ],
+    correct: "\\(\\max = \\dfrac{10}{3},\\;\\min = -\\dfrac{7}{6}\\)",
+    explanation: "정답: \\(\\max = \\dfrac{10}{3},\\;\\min = -\\dfrac{7}{6}\\)."
+  },
+  {
+    question: "다음 함수를 고려하자. \\(f(x) = \\int_{0}^{x} (t^2 - 2t - 3)\\,dt\\). 이 때, 이 함수의 극댓값은 얼마인가?",
+    choices: [
+      "\\(-\\dfrac{4}{3}\\)",
+      "\\(0\\)",
+      "\\(\\dfrac{5}{3}\\)",
+      "\\(4\\)"
+    ],
+    correct: "\\(\\dfrac{5}{3}\\)",
+    explanation: "정답: \\(\\dfrac{5}{3}\\)."
+  },
+  {
+    question: "다음 함수를 고려하자. \\(f(x) = \\int_{1}^{x} (t^2 - 4t + 3)\\,dt\\). 이 함수의 극댓값, 극솏값, 그리고 그 합으로 옳은 것은?",
+    choices: [
+      "극댓값 \\(0\\), 극솏값 \\(-\\dfrac{4}{3}\\), 합 \\(-\\dfrac{4}{3}\\)",
+      "극댓값 \\(\\dfrac{10}{3}\\), 극솏값 \\(-\\dfrac{7}{6}\\), 합 \\(\\dfrac{13}{6}\\)",
+      "극댓값 \\(-\\dfrac{4}{3}\\), 극솏값 \\(0\\), 합 \\(-\\dfrac{4}{3}\\)",
+      "극댓값 \\(1\\), 극솏값 \\(-2\\), 합 \\(-1\\)"
+    ],
+    correct: "극댓값 \\(0\\), 극솏값 \\(-\\dfrac{4}{3}\\), 합 \\(-\\dfrac{4}{3}\\)",
+    explanation: "정답: 극댓값 \\(0\\), 극솏값 \\(-\\dfrac{4}{3}\\), 합 \\(-\\dfrac{4}{3}\\)."
+  },
+  {
+    question: "다음 함수를 고려하자. \\(f(x) = \\int_{0}^{x} (t^2 - 6t + 8)\\,dt\\). 이 때, 이 함수의 극댓값과 극솏값으로 옳은 것은?",
+    choices: [
+      "\\(\\max = \\dfrac{20}{3},\\; \\min = \\dfrac{16}{3}\\)",
+      "\\(\\max = 4,\\; \\min = 2\\)",
+      "\\(\\max = \\dfrac{10}{3},\\; \\min = -\\dfrac{4}{3}\\)",
+      "\\(\\max = 0,\\; \\min = -\\dfrac{4}{3}\\)"
+    ],
+    correct: "\\(\\max = \\dfrac{20}{3},\\; \\min = \\dfrac{16}{3}\\)",
+    explanation: "정답: \\(\\max = \\dfrac{20}{3},\\; \\min = \\dfrac{16}{3}\\)."
+  },
+  {
+    question: "구간 \\([-1,0]\\)에서 정의된 함수 \\(f(x) = \\int_{x}^{x+1} (t^2 + t)\\,dt\\)의 최솟값은 얼마인가?",
+    choices: [
+      "\\(-\\dfrac{1}{6}\\)",
+      "\\(\\dfrac{1}{6}\\)",
+      "\\(\\dfrac{5}{6}\\)",
+      "\\(-\\dfrac{5}{6}\\)"
+    ],
+    correct: "\\(-\\dfrac{1}{6}\\)",
+    explanation: "정답: \\(-\\dfrac{1}{6}\\)."
+  },
+  {
+    question: "\\(\\displaystyle \\lim_{h \\to 0} \\dfrac{1}{h}\\int_{0}^{h} (x^2 + 2x - 8)\\,dx\\) 의 값은?",
+    choices: [
+      "\\(-8\\)",
+      "\\(-6\\)",
+      "\\(0\\)",
+      "\\(8\\)"
+    ],
+    correct: "\\(-8\\)",
+    explanation: "정답: \\(-8\\)."
+  },
+  {
+    question: "\\(\\displaystyle \\lim_{x \\to 1} \\dfrac{1}{x-1}\\int_{1}^{x} (t-1)(t+3)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(-1\\)",
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(3\\)"
+    ],
+    correct: "\\(0\\)",
+    explanation: "정답: \\(0\\)."
+  },
+  {
+    question: "함수 \\(f(x) = x^2 + 2x - 1\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 0}\\dfrac{1}{x}\\int_{0}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(-1\\)",
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(2\\)"
+    ],
+    correct: "\\(-1\\)",
+    explanation: "정답: \\(-1\\)."
+  },
+  {
+    question: "함수 \\(f(x) = (x - 13)^2\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 0}\\dfrac{1}{x}\\int_{0}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(13\\)",
+      "\\(26\\)",
+      "\\(169\\)",
+      "\\(0\\)"
+    ],
+    correct: "\\(169\\)",
+    explanation: "정답: \\(169\\)."
+  },
+  {
+    question: "함수 \\(f(x) = x^3 - 4x^2 + 5x - 2\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 1}\\dfrac{1}{x-1}\\int_{1}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(-1\\)",
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(2\\)"
+    ],
+    correct: "\\(0\\)",
+    explanation: "정답: \\(0\\)."
+  },
+  {
+    question: "함수 \\(f(x) = (x+1)^3\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 1}\\dfrac{1}{x-1}\\int_{1}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(2\\)",
+      "\\(4\\)",
+      "\\(6\\)",
+      "\\(8\\)"
+    ],
+    correct: "\\(8\\)",
+    explanation: "정답: \\(8\\)."
+  },
+  {
+    question: "함수 \\(f(x) = 4x^2 - 3x + 1\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 1}\\dfrac{1}{x^2 - 1}\\int_{1}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(2\\)",
+      "\\(\\infty\\)"
+    ],
+    correct: "\\(1\\)",
+    explanation: "정답: \\(1\\)."
+  },
+  {
+    question: "함수 \\(f(x) = x^3 + 2x^2 + x\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 1}\\dfrac{1}{x^2 - 1}\\int_{1}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(1\\)",
+      "\\(2\\)",
+      "\\(4\\)",
+      "\\(-2\\)"
+    ],
+    correct: "\\(2\\)",
+    explanation: "정답: \\(2\\)."
+  },
+  {
+    // ★★ 수정된 문제 #14 ★★
+    question: "함수 \\(f(x) = x^2 + 3x - 2\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 2}\\dfrac{1}{x - 2}\\int_{2}^{x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(6\\)",
+      "\\(7\\)",
+      "\\(8\\)",
+      "\\(9\\)"
+    ],
+    correct: "\\(8\\)",
+    explanation: "정답: \\(8\\). (적분 구간을 [2,x]로 고쳐야 올바른 형태가 됩니다.)"
+  },
+  {
+    question: "함수 \\(f(x) = 4x - 3\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 0}\\dfrac{1}{x}\\int_{1}^{1+x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(-1\\)",
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(3\\)"
+    ],
+    correct: "\\(1\\)",
+    explanation: "정답: \\(1\\)."
+  },
+  {
+    question: "함수 \\(f(x) = 2x^2 + 3x + 1\\)에 대하여, \\(\\displaystyle \\lim_{h \\to 0}\\dfrac{1}{h}\\int_{1}^{1+h} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(2\\)",
+      "\\(3\\)",
+      "\\(6\\)",
+      "\\(9\\)"
+    ],
+    correct: "\\(6\\)",
+    explanation: "정답: \\(6\\)."
+  },
+  {
+    question: "함수 \\(f(x) = 3x^2 + 1\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 0}\\dfrac{1}{2x}\\int_{3}^{3+x} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(0\\)",
+      "\\(2\\)",
+      "\\(14\\)",
+      "\\(\\infty\\)"
+    ],
+    correct: "\\(14\\)",
+    explanation: "정답: \\(14\\)."
+  },
+  {
+    question: "함수 \\(f(x) = \\int_{0}^{x} (3t^2 - 2t + 1)\\,dt\\)일 때, \\(\\displaystyle \\lim_{h \\to 0}\\dfrac{f(1+h) - f(1-h)}{2h}\\) 의 값은?",
+    choices: [
+      "\\(0\\)",
+      "\\(1\\)",
+      "\\(2\\)",
+      "\\(4\\)"
+    ],
+    correct: "\\(2\\)",
+    explanation: "정답: \\(2\\)."
+  },
+  {
+    question: "함수 \\(f(x) = x^3 - 4x^2 + 1\\)에 대하여, \\(\\displaystyle \\lim_{x \\to 2}\\dfrac{1}{x - 2}\\int_{4}^{x^2} f(t)\\,dt\\) 의 값은?",
+    choices: [
+      "\\(1\\)",
+      "\\(2\\)",
+      "\\(3\\)",
+      "\\(4\\)"
+    ],
+    correct: "\\(4\\)",
+    explanation: "정답: \\(4\\)."
+  }
+];
+
+// 난이도별 문제당 시간(초) & 정답 점수
+let difficultyTime = {
+  "top": 20,
+  "high": 30,
+  "mid": 40,
+  "low": 999999  // 사실상 무제한
+};
+let difficultyScore = {
+  "top": 20,
+  "high": 15,
+  "mid": 13,
+  "low": 10
+};
+
+// 전역 변수들
+let playerName = "";
+let difficulty = "low";
+let score = 0;
+let lives = 3;
+let currentProblemIndex = 0;
+let usedProblems = []; // 한 바퀴 돌았는지 추적용
+let totalTime = 0;     // 전체 게임 시간(초)
+let totalTimeInterval = null;
+let questionTimeLeft = 0;
+let questionInterval = null;
+let currentProblem = null; // 현재 문제 객체
+let problemPool = [];      // 문제를 섞어서 관리
+
+// 배열 섞기
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+function startGame() {
+  const nameInput = document.getElementById('playerName');
+  playerName = nameInput.value.trim();
+  if (!playerName) {
+    alert("이름을 입력하세요!");
+    return;
+  }
+
+  difficulty = document.getElementById('difficultySelect').value;
+  score = 0;
+  lives = 3;
+  totalTime = 0;
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+
+  // 문제 배열 섞기 (첫 바퀴용)
+  problemPool = [...problems];
+  shuffleArray(problemPool);
+  currentProblemIndex = 0;
+  usedProblems = [];
+
+  // 화면 전환
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('game-screen').classList.remove('hidden');
+  document.getElementById('game-over-screen').classList.add('hidden');
+
+  // 전체 게임 시간 타이머 시작
+  if (totalTimeInterval) clearInterval(totalTimeInterval);
+  totalTimeInterval = setInterval(() => {
+    totalTime++;
+    document.getElementById('totalTime').textContent = totalTime;
+  }, 1000);
+
+  // 첫 문제 표시
+  showNextProblem();
+}
+
+function showNextProblem() {
+  // 에너지바 초기화
+  stopQuestionTimer();
+  setupEnergyBar();
+
+  // 문제 풀 재생성(모든 문제 1바퀴 돌았다면 다시 셔플)
+  if (currentProblemIndex >= problemPool.length) {
+    shuffleArray(problemPool);
+    currentProblemIndex = 0;
+  }
+  currentProblem = problemPool[currentProblemIndex];
+  currentProblemIndex++;
+
+  // 보기 섞기
+  let choiceArr = [...currentProblem.choices];
+  shuffleArray(choiceArr);
+
+  // 화면에 표시
+  const problemTextDiv = document.getElementById('problemText');
+  const choiceListDiv = document.getElementById('choiceList');
+  const feedbackDiv = document.getElementById('feedback');
+  const submitBtn = document.getElementById('submitBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  problemTextDiv.innerHTML = currentProblem.question;
+  choiceListDiv.innerHTML = "";
+  feedbackDiv.classList.add('hidden');
+  feedbackDiv.innerHTML = "";
+  submitBtn.disabled = false;
+  submitBtn.classList.remove('hidden');
+  nextBtn.classList.add('hidden');
+
+  // 선택지 라디오 버튼 생성
+  choiceArr.forEach((choiceText, idx) => {
+    const div = document.createElement('div');
+    div.className = 'answer-choice';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'answer';
+    radio.value = choiceText;
+    radio.id = 'choice_' + idx;
+
+    const label = document.createElement('label');
+    label.setAttribute('for', 'choice_' + idx);
+    label.innerHTML = choiceText;
+
+    div.appendChild(radio);
+    div.appendChild(label);
+    choiceListDiv.appendChild(div);
+  });
+
+  // MathJax 렌더링
+  MathJax.typeset();
+
+  // 문제당 타이머 시작(난이도가 low가 아니면)
+  if (difficulty !== 'low') {
+    startQuestionTimer();
+  }
+}
+
+// 문제당 타이머/에너지바 설정
+function setupEnergyBar() {
+  const energyBar = document.getElementById('energyBar');
+  const fill = document.getElementById('energyFill');
+  if (difficulty === 'low') {
+    energyBar.style.display = 'none';
+  } else {
+    energyBar.style.display = 'block';
+    fill.style.width = '100%';
+  }
+}
+
+function startQuestionTimer() {
+  questionTimeLeft = difficultyTime[difficulty];
+  updateEnergyBar();
+  questionInterval = setInterval(() => {
+    questionTimeLeft--;
+    if (questionTimeLeft <= 0) {
+      stopQuestionTimer();
+      timeOver();
+    } else {
+      updateEnergyBar();
+    }
+  }, 1000);
+}
+
+function stopQuestionTimer() {
+  if (questionInterval) {
+    clearInterval(questionInterval);
+    questionInterval = null;
+  }
+}
+
+function updateEnergyBar() {
+  const fill = document.getElementById('energyFill');
+  let total = difficultyTime[difficulty];
+  let ratio = questionTimeLeft / total;
+  fill.style.width = (ratio * 100) + "%";
+}
+
+function timeOver() {
+  // 시간 초과 시 기회 1 감소
+  lives--;
+  document.getElementById('lives').textContent = lives;
+  checkGameOver();
+
+  if (lives > 0) {
+    // '정답 확인' 대신 "시간 초과" 메시지
+    const feedbackDiv = document.getElementById('feedback');
+    feedbackDiv.classList.remove('hidden');
+    feedbackDiv.classList.remove('correct');
+    feedbackDiv.innerHTML = "시간 초과! 정답은:<br/>" + currentProblem.correct;
+
+    document.getElementById('submitBtn').classList.add('hidden');
+    document.getElementById('submitBtn').disabled = true;
+    document.getElementById('nextBtn').classList.remove('hidden');
+    MathJax.typeset();
+  }
+}
+
+function submitAnswer() {
+  stopQuestionTimer();
+  const feedbackDiv = document.getElementById('feedback');
+  feedbackDiv.classList.remove('hidden');
+  feedbackDiv.classList.remove('correct');
+  const radios = document.getElementsByName('answer');
+  let selectedValue = null;
+  for (let r of radios) {
+    if (r.checked) {
+      selectedValue = r.value;
+      break;
+    }
+  }
+  if (!selectedValue) {
+    alert("답안을 선택하세요.");
+    if (questionInterval) startQuestionTimer();
+    return;
+  }
+
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('submitBtn').classList.add('hidden');
+  document.getElementById('nextBtn').classList.remove('hidden');
+
+  // 정답 판별
+  if (selectedValue === currentProblem.correct) {
+    feedbackDiv.classList.add('correct');
+    feedbackDiv.innerHTML = "정답입니다!";
+    score += difficultyScore[difficulty];
+    document.getElementById('score').textContent = score;
+  } else {
+    lives--;
+    document.getElementById('lives').textContent = lives;
+    feedbackDiv.innerHTML = "오답입니다! 정답은:<br/>" + currentProblem.correct;
+  }
+  checkGameOver();
+  MathJax.typeset();
+}
+
+function nextQuestion() {
+  showNextProblem();
+}
+
+function checkGameOver() {
+  if (lives <= 0) {
+    endGame();
+  }
+}
+
+function endGame() {
+  stopQuestionTimer();
+  clearInterval(totalTimeInterval);
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('game-over-screen').classList.remove('hidden');
+  document.getElementById('finalScore').textContent = score;
+}
+
+// 점수 전송
+function sendScore() {
+  saveData("정적분으로 정의된 함수(2)", playerName, score, totalTime);
+}
+</script>
+</body>
+</html>
